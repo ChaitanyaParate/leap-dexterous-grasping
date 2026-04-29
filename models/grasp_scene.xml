@@ -1,0 +1,24 @@
+<mujoco model="leap_grasp">
+  <option integrator="implicitfast" cone="elliptic" impratio="100" timestep="0.002"/>
+
+  <include file="/mnt/newvolume/Programming/Python/Deep_Learning/leap-dexterous-grasping/mujoco_menagerie/leap_hand/right_hand.xml"/>
+
+  <worldbody>
+    <!-- Fixed mount for the hand above the table -->
+    <body name="hand_mount" pos="0 0 0.45" euler="0 0 0">
+      <freejoint name="hand_root"/>  <!-- remove this, use fixed attach -->
+    </body>
+
+    <!-- Table -->
+    <body name="table" pos="0 0 0.2">
+      <geom name="table_top" type="box" size="0.3 0.3 0.02" rgba="0.8 0.6 0.4 1"/>
+    </body>
+
+    <!-- Target object: cube -->
+    <body name="object" pos="0 0 0.24">
+      <freejoint name="object_joint"/>
+      <geom name="cube" type="box" size="0.025 0.025 0.025" 
+            rgba="1 0 0 1" mass="0.1"/>
+    </body>
+  </worldbody>
+</mujoco>
