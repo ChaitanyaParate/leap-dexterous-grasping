@@ -1,3 +1,9 @@
 .venv
-mujoco_menagerie
 checkpoints
+
+# Ignore all of mujoco_menagerie except the specific leap_hand XMLs
+mujoco_menagerie/*
+!mujoco_menagerie/leap_hand/
+mujoco_menagerie/leap_hand/*
+!mujoco_menagerie/leap_hand/grasp_scene.xml
+!mujoco_menagerie/leap_hand/right_hand_grasp.xml

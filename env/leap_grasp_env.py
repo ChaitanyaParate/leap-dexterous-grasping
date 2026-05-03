@@ -88,18 +88,25 @@ class LeapGraspEnv(gym.Env):
         mean_dist = np.mean(distances) if distances else 1.0
         approach_reward = 10.0 * max(0.0, 0.2 - mean_dist)
 
-        # 2. Contact reward: detect actual finger-on-cube contacts via MuJoCo
+        # 2. Contact reward: detect actual hand-on-cube contacts
         cube_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "cube")
-        n_cube_contacts = 0
+        table_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "table_top")
+        floor_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
+        
+        n_hand_contacts = 0
         for i in range(self.data.ncon):
             c = self.data.contact[i]
-            if c.geom1 == cube_geom_id or c.geom2 == cube_geom_id:
-                n_cube_contacts += 1
-        contact_reward = 0.5 * min(n_cube_contacts, 4)  # cap at 4 contacts
+            is_cube_contact = (c.geom1 == cube_geom_id) or (c.geom2 == cube_geom_id)
+            is_env_contact = (c.geom1 in [table_geom_id, floor_geom_id]) or (c.geom2 in [table_geom_id, floor_geom_id])
+            
+            if is_cube_contact and not is_env_contact:
+                n_hand_contacts += 1
+                
+        contact_reward = 0.5 * min(n_hand_contacts, 4)  # cap at 4 contacts
 
-        # 3. Lift: only counts when hand is near the object
+        # 3. Lift: only counts when hand is physically grasping the object
         lift_height = max(0.0, obj_pos[2] - 0.075)
-        grasping = mean_dist < 0.06
+        grasping = n_hand_contacts >= 2
         lift_reward = lift_height * 50.0 * (1.0 if grasping else 0.0)
 
         # 4. Action penalty: small regularization to penalize large deltas (jitter)
