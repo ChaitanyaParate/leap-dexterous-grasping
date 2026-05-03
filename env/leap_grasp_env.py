@@ -39,8 +39,9 @@ class LeapGraspEnv(gym.Env):
         obs_high = np.full(39,  np.inf, dtype=np.float32)
         self.observation_space = spaces.Box(obs_low, obs_high, dtype=np.float32)
         self.action_space      = spaces.Box(
-            low=self.joint_limits_low.astype(np.float32),
-            high=self.joint_limits_high.astype(np.float32),
+            low=-1.0,
+            high=1.0,
+            shape=(16,),
             dtype=np.float32
         )
 
@@ -51,6 +52,11 @@ class LeapGraspEnv(gym.Env):
 
         # Lift threshold: object center must exceed this height to count as lifted
         self.lift_threshold = 0.25  # meters above world origin
+
+        # Require cube to stay above threshold for this many consecutive steps
+        # This prevents the "fling and terminate" exploit
+        self.lift_sustain_required = 10
+        self._lift_count = 0
 
         # Episode length
         self.max_steps = 500
@@ -69,27 +75,35 @@ class LeapGraspEnv(gym.Env):
     def _get_reward(self):
         obj_pos = self.data.xpos[self.object_body_id]
 
-        # 1. Approach: mean distance from fingertip geoms to object
+        # 1. Approach: positive reward for getting closer to the cube
+        # mean_dist is ~0.14 open, ~0.10 closed.
+        # 10.0 * (0.2 - mean_dist) -> +0.6 open, +1.0 closed.
         fingertip_names = ["if_tip", "mf_tip", "rf_tip", "th_tip"]
         distances = []
         for name in fingertip_names:
-            site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
-            if site_id >= 0:
-                tip_pos = self.data.geom_xpos[site_id]
+            geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
+            if geom_id >= 0:
+                tip_pos = self.data.geom_xpos[geom_id]
                 distances.append(np.linalg.norm(tip_pos - obj_pos))
         mean_dist = np.mean(distances) if distances else 1.0
-        approach_reward = -mean_dist  # w=1.0
+        approach_reward = 10.0 * max(0.0, 0.2 - mean_dist)
 
-        # 2. Contact bonus: reward each fingertip within 3 cm
-        contact_reward = 0.1 * np.sum([d < 0.03 for d in distances])
+        # 2. Contact reward: detect actual finger-on-cube contacts via MuJoCo
+        cube_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "cube")
+        n_cube_contacts = 0
+        for i in range(self.data.ncon):
+            c = self.data.contact[i]
+            if c.geom1 == cube_geom_id or c.geom2 == cube_geom_id:
+                n_cube_contacts += 1
+        contact_reward = 0.5 * min(n_cube_contacts, 4)  # cap at 4 contacts
 
-        # 3. Lift: only counts when hand is near the object (grasping, not knocking)
+        # 3. Lift: only counts when hand is near the object
         lift_height = max(0.0, obj_pos[2] - 0.075)
-        grasping = mean_dist < 0.05
-        lift_reward = lift_height * 20.0 * (1.0 if grasping else 0.0)
+        grasping = mean_dist < 0.06
+        lift_reward = lift_height * 50.0 * (1.0 if grasping else 0.0)
 
-        # 4. Action penalty: penalize large commanded actions
-        action_penalty = -0.001 * np.sum(np.square(self.data.ctrl[:16]))
+        # 4. Action penalty: small regularization to penalize large deltas (jitter)
+        action_penalty = -0.01 * np.sum(np.square(getattr(self, 'last_action', np.zeros(16))))
 
         return approach_reward + contact_reward + lift_reward + action_penalty
 
@@ -111,14 +125,26 @@ class LeapGraspEnv(gym.Env):
         self.data.qpos[obj_qpos_idx+3:obj_qpos_idx+7] = [1, 0, 0, 0]  # identity quat
 
         mujoco.mj_forward(self.model, self.data)
+        
+        # Initialize control targets to current joint positions for delta control
+        self.data.ctrl[:16] = self.data.qpos[:16].copy()
+        self.last_action = np.zeros(16, dtype=np.float32)
+        
         self._step_count = 0
+        self._lift_count = 0
         return self._get_obs(), {}
 
     # ------------------------------------------------------------------
     def step(self, action):
-        # Clip action to joint limits and apply
-        action = np.clip(action, self.joint_limits_low, self.joint_limits_high)
-        self.data.ctrl[:] = action
+        self.last_action = action
+        
+        # Delta control: action in [-1, 1] scaled by max_delta (0.1 rad per step)
+        max_delta = 0.1
+        target_ctrl = self.data.ctrl[:16] + action * max_delta
+        
+        # Clip final target to physical joint limits
+        target_ctrl = np.clip(target_ctrl, self.joint_limits_low, self.joint_limits_high)
+        self.data.ctrl[:16] = target_ctrl
 
         # Advance simulation (5 physics steps per policy step)
         for _ in range(5):
@@ -128,11 +154,27 @@ class LeapGraspEnv(gym.Env):
         reward  = self._get_reward()
         self._step_count += 1
 
-        obj_pos     = self.data.xpos[self.object_body_id]
-        lifted      = obj_pos[2] > self.lift_threshold
-        timeout     = self._step_count >= self.max_steps
-        terminated  = lifted
-        truncated   = timeout
+        obj_pos = self.data.xpos[self.object_body_id]
+
+        # Sustained lift: must stay above threshold for N consecutive steps
+        # Prevents the "fling" exploit where cube briefly pops above the threshold
+        if obj_pos[2] > self.lift_threshold:
+            self._lift_count += 1
+        else:
+            self._lift_count = 0
+
+        # Out of bounds termination (cube dropped or flung away)
+        dist_xy = np.linalg.norm(obj_pos[:2])
+        out_of_bounds = dist_xy > 0.1 or obj_pos[2] < 0.0
+        
+        timeout    = self._step_count >= self.max_steps
+        terminated = self._lift_count >= self.lift_sustain_required
+        
+        if out_of_bounds:
+            reward -= 50.0
+            terminated = True
+            
+        truncated  = timeout and not terminated
 
         return obs, reward, terminated, truncated, {}
 
