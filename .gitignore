@@ -1,7 +1,6 @@
 .venv
 checkpoints
 
-# Ignore all of mujoco_menagerie except the specific leap_hand XMLs
 mujoco_menagerie/*
 !mujoco_menagerie/leap_hand/
 mujoco_menagerie/leap_hand/*

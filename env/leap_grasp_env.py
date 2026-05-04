@@ -189,7 +189,7 @@ class LeapGraspEnv(gym.Env):
     def render(self):
         if self.renderer is None:
             self.renderer = mujoco.Renderer(self.model, height=480, width=640)
-        self.renderer.update_scene(self.data)
+        self.renderer.update_scene(self.data, camera="video_cam")
         return self.renderer.render()
 
     def close(self):

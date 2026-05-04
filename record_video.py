@@ -31,12 +31,12 @@ def main():
 
     # 4. Record episodes
     fps = 30
-    video_path = "results/grasp_demonstration.mp4"
-    writer = imageio.get_writer(video_path, fps=fps)
     
-    print(f"Recording demonstration to {video_path}...")
-    
-    for ep in range(3): # Record 3 episodes
+    for ep in range(5): # Record 5 episodes
+        video_path = f"videos/grasp_demo_ep{ep+1}.mp4"
+        writer = imageio.get_writer(video_path, fps=fps)
+        print(f"Recording demonstration to {video_path}...")
+        
         obs = venv.reset()
         done = False
         
@@ -51,9 +51,9 @@ def main():
             frame = env.render()
             writer.append_data(frame)
             
+        writer.close()
         print(f"Episode {ep+1} recorded.")
     
-    writer.close()
     print("Video recording complete.")
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@
 
   <worldbody>
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <camera name="video_cam" mode="targetbody" target="object" pos="0.3 0.15 0.25" />
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
 
     <!-- Table surface -->
