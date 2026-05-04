@@ -67,7 +67,7 @@ print("Verification passed.")
 
 # Full training
 model.learn(
-    total_timesteps=1_000_000,
+    total_timesteps=1_500_000,
     callback=[checkpoint_cb, eval_cb],
     reset_num_timesteps=False
 )
