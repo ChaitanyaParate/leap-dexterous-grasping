@@ -52,9 +52,7 @@ def main():
     )
 
     # Load the model
-    model_path = "results/final_model.zip"
-    if not os.path.exists(model_path):
-        model_path = "results/best_model/best_model.zip"
+    model_path = "results/best_model/best_model.zip"
         
     print(f"Loading model from {model_path}")
     model = PPO.load(model_path, env=env, tensorboard_log="results/tensorboard/")

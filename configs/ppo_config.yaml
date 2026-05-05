@@ -1,0 +1,37 @@
+# PPO Hyperparameters for LEAP Hand Grasping Task
+# Stable Baselines 3 PPO — Final Configuration
+
+algorithm: PPO
+policy: MlpPolicy
+
+# --- Core PPO Hyperparameters ---
+n_steps: 2048          # Steps per environment per rollout before update
+batch_size: 64         # Minibatch size for gradient updates
+n_epochs: 10           # Number of gradient steps per rollout
+learning_rate: 0.0003  # Adam learning rate (3e-4)
+gamma: 0.99            # Discount factor for future rewards
+gae_lambda: 0.95       # GAE lambda for advantage estimation
+clip_range: 0.15       # PPO clip range (tightened from 0.2 for stability)
+ent_coef: 0.01         # Entropy coefficient (encourages exploration)
+vf_coef: 0.5           # Value function loss coefficient
+max_grad_norm: 0.5     # Gradient clipping norm
+
+# --- Environment Settings ---
+n_envs: 1                    # Number of parallel environments
+max_episode_steps: 500       # Max steps before episode truncation
+physics_substeps: 5          # MuJoCo steps per policy step (timestep=0.002s)
+action_max_delta: 0.1        # Max joint angle change per step (radians)
+lift_threshold: 0.25         # Z-height (m) for lift success
+lift_sustain_steps: 10       # Consecutive steps cube must stay above threshold
+
+# --- Reward Weights ---
+approach_reward_scale: 10.0  # Scale for fingertip-to-cube distance reward
+contact_reward_scale: 0.5    # Bonus per hand-cube contact (max 4)
+lift_reward_scale: 50.0      # Scale for lift height reward (grasping-gated)
+action_penalty_scale: 0.01   # Penalty weight for large actions
+
+# --- Training ---
+total_timesteps: 3_500_000   # Total training steps (including resumed runs)
+checkpoint_freq: 50000       # Save checkpoint every N steps
+eval_freq: 50000             # Evaluate policy every N steps
+eval_episodes: 5             # Episodes per mid-training evaluation

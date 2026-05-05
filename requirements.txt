@@ -1,0 +1,10 @@
+gymnasium==0.29.1
+imageio-ffmpeg==0.6.0
+matplotlib==3.10.9
+mujoco==3.1.6
+numpy==2.4.4
+python-docx==1.2.0
+stable_baselines3==2.3.2
+tensorboard==2.20.0
+tensorboard-data-server==0.7.2
+torch==2.11.0

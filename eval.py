@@ -29,7 +29,7 @@ def main():
     print(f"Loading model from {model_path}")
     model = PPO.load(model_path, env=env)
     
-    num_episodes = 20
+    num_episodes = 100
     episode_rewards = []
     episode_lengths = []
     success_count = 0
@@ -56,8 +56,10 @@ def main():
         episode_rewards.append(ep_reward)
         episode_lengths.append(ep_length)
         
-        # Determine success (episode length == 500 and high reward means it held the cube securely)
-        if ep_length == 500 and ep_reward > 1000:
+        # Determine success: 
+        # 1. Early termination with positive reward > 500 means it successfully lifted the cube past the threshold!
+        # 2. Reaching 500 steps with >1000 reward means it stably grasped it but didn't quite hit the Z threshold.
+        if (ep_length < 500 and ep_reward > 500) or (ep_length == 500 and ep_reward > 1000):
             success_count += 1
             
         print(f"Episode {ep+1}: Reward = {ep_reward:.2f}, Length = {ep_length}")

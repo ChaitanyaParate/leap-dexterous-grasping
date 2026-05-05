@@ -1,5 +1,14 @@
-.venv
-checkpoints
+.venv/
+archive/
+task.md
+mjmodel.xml
+
+# Results - keep text/plots, ignore large binaries
+results/checkpoints/
+results/*.zip
+results/*.pkl
+results/tensorboard/
+results/logs/
 
 mujoco_menagerie/*
 !mujoco_menagerie/leap_hand/
