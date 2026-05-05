@@ -2,7 +2,7 @@
 
 A reinforcement learning pipeline for training the **LEAP Hand** robotic manipulator to grasp and lift a cube in MuJoCo, using PPO (Proximal Policy Optimization) from Stable Baselines 3.
 
-**Final Result: 96% success rate over 100 randomized evaluation episodes.**
+**Final Result: 0% true success rate over 100 randomized evaluation episodes. (Proxy metric previously reported 96%).**
 
 ---
 
@@ -100,15 +100,24 @@ Parses TensorBoard event files and saves `results/learning_curve.png`.
 
 ## Expected Results
 
-After 3.5M total training timesteps:
+After 2.5M total training timesteps (1.5M fresh + 1M resume):
 
 | Metric | Value |
 |---|---|
-| Mean Episode Reward | 1632.25 ± 461.05 |
-| Mean Episode Length | 461.72 / 500 steps |
-| **Success Rate** | **96% (96/100 episodes)** |
+| Mean Episode Reward | 1541.28 ± 499.10 |
+| Mean Episode Length | 441.86 / 500 steps |
+| **True Success Rate** | **0% (0/100 episodes)** |
 
-A "success" is defined as the cube's center exceeding Z = 0.25m while at least 2 fingertips are in contact with it, held for at least 10 consecutive timesteps.
+### The Success Metric Flaw
+During evaluation, the rigorous physical success criterion is defined as: **the object's Z-coordinate must exceed 0.25m and be held there for 10 consecutive timesteps** while maintaining at least 2 contacts.
+
+The policy achieved a 0% success rate under this strict criterion. The previously reported 96% was the result of a flawed proxy metric (`ep_reward > 500` + early termination) combined with an overly restrictive out-of-bounds penalty (`dist_xy > 0.1m`). 
+
+The agent learned to "hack" the dense reward function by grasping the cube and hovering it slightly off the ground (e.g., `Z=0.12m`) for the entire 500-step episode, accumulating ~1600 reward without ever reaching the 0.25m lift threshold. Furthermore, if it flung the cube out of bounds after accumulating enough approach reward, it would falsely register as a success due to the flawed evaluation script logic.
+
+This repository serves as a case study in the dangers of dense reward shaping and proxy evaluation metrics in Reinforcement Learning.
+
+For a full analysis of the learning curve regression and reward hacking mechanics, please read `report.pdf`.
 
 ---
 

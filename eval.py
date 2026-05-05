@@ -11,15 +11,8 @@ def make_env():
 
 def main():
     os.makedirs("results", exist_ok=True)
-    
-    # Create evaluation environment
+    # Create pure evaluation environment (no VecNormalize wrapper needed since norm_obs=False)
     env = DummyVecEnv([make_env])
-    
-    # Load normalization stats from training
-    if os.path.exists("results/vecnormalize.pkl"):
-        env = VecNormalize.load("results/vecnormalize.pkl", env)
-        env.training = False
-        env.norm_reward = False
     
     # Load the best or final model
     model_path = "results/best_model/best_model.zip"
@@ -41,6 +34,7 @@ def main():
         done = False
         ep_reward = 0
         ep_length = 0
+        is_success = False
         
         while not done:
             action, _ = model.predict(obs, deterministic=True)
@@ -49,17 +43,15 @@ def main():
             ep_length += 1
             done = dones[0]
             
-            # If the episode ends before max steps, it means the lift condition was met
-            # or it dropped the cube (which gets a huge penalty).
-            # A success is when the reward is positive and it terminates early.
+            # Check rigorous physical success condition from info dict
+            if infos[0].get('is_success', False):
+                is_success = True
             
         episode_rewards.append(ep_reward)
         episode_lengths.append(ep_length)
         
-        # Determine success: 
-        # 1. Early termination with positive reward > 500 means it successfully lifted the cube past the threshold!
-        # 2. Reaching 500 steps with >1000 reward means it stably grasped it but didn't quite hit the Z threshold.
-        if (ep_length < 500 and ep_reward > 500) or (ep_length == 500 and ep_reward > 1000):
+        # Determine success rigorously
+        if is_success:
             success_count += 1
             
         print(f"Episode {ep+1}: Reward = {ep_reward:.2f}, Length = {ep_length}")

@@ -62,10 +62,21 @@ class LeapGraspEnv(gym.Env):
         self.max_steps = 500
         self._step_count = 0
 
+        # Robustly find hand joint indices by name (avoids brittle slicing)
+        self.hand_joint_names = [mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, i)
+                                 for i in range(self.model.njnt)
+                                 if mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, i) != "object_joint"]
+        
+        self.hand_qpos_indices = np.array([self.model.jnt_qposadr[
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, n)] for n in self.hand_joint_names])
+            
+        self.hand_qvel_indices = np.array([self.model.jnt_dofadr[
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, n)] for n in self.hand_joint_names])
+
     # ------------------------------------------------------------------
     def _get_obs(self):
-        joint_pos  = self.data.qpos[:16].copy()          # 16 joint angles
-        joint_vel  = self.data.qvel[:16].copy()          # 16 joint velocities
+        joint_pos  = self.data.qpos[self.hand_qpos_indices].copy()
+        joint_vel  = self.data.qvel[self.hand_qvel_indices].copy()
         obj_pos    = self.data.xpos[self.object_body_id] # (3,)  world position
         obj_quat   = self.data.xquat[self.object_body_id]# (4,)  world quaternion
 
@@ -82,9 +93,10 @@ class LeapGraspEnv(gym.Env):
         distances = []
         for name in fingertip_names:
             geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
-            if geom_id >= 0:
-                tip_pos = self.data.geom_xpos[geom_id]
-                distances.append(np.linalg.norm(tip_pos - obj_pos))
+            if geom_id < 0:
+                raise ValueError(f"Required geom '{name}' not found in MuJoCo model.")
+            tip_pos = self.data.geom_xpos[geom_id]
+            distances.append(np.linalg.norm(tip_pos - obj_pos))
         mean_dist = np.mean(distances) if distances else 1.0
         approach_reward = 10.0 * max(0.0, 0.2 - mean_dist)
 
@@ -182,8 +194,13 @@ class LeapGraspEnv(gym.Env):
             terminated = True
             
         truncated  = timeout and not terminated
+        
+        # Explicitly inject the true rigorous success flag
+        info = {
+            'is_success': self._lift_count >= self.lift_sustain_required
+        }
 
-        return obs, reward, terminated, truncated, {}
+        return obs, reward, terminated, truncated, info
 
     # ------------------------------------------------------------------
     def render(self):

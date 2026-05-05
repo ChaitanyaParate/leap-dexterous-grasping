@@ -68,8 +68,7 @@ def build():
     pdf.set_text_color(20, 50, 120)
     pdf.cell(0, 10, "Learning-Based Dexterous Grasping with the LEAP Hand", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.set_font("Helvetica", size=9.5)
-    pdf.set_text_color(80, 80, 80)
-    pdf.cell(0, 6, "PPO Training in MuJoCo  |  96% Success Rate over 100 Evaluation Episodes", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.cell(0, 6, "PPO Training in MuJoCo  |  True Success Rate: 0%  (Proxy Metric: 96%)", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(3)
     pdf.set_draw_color(20, 50, 120)
     pdf.set_line_width(0.6)
@@ -137,7 +136,7 @@ def build():
         ("gamma / gae_lambda", "0.99  /  0.95"),
         ("clip_range", "0.15  (tightened from default 0.2 for stability at high reward)"),
         ("ent_coef / vf_coef", "0.01  /  0.5"),
-        ("Total timesteps", "3,500,000  (1.5M fresh + 1M resume + 1M resume)"),
+        ("Total timesteps", "2,500,000  (1.5M fresh + 1M resume)"),
         ("Physics substeps", "5 per policy step  (timestep = 0.002 s)"),
         ("VecNormalize", "Enabled -- normalizes observations and rewards across the run"),
     ]
@@ -154,35 +153,46 @@ def build():
         pdf.ln(2)
     pdf.body_text(
         "The learning curve shows three distinct phases: (1) Exploration (0-300k steps): the agent "
-        "discovers fingertip-to-cube proximity rewards, ep_rew_mean rises from ~0 to ~400. "
-        "(2) Grasping discovery (300k-800k): the policy learns to make stable multi-finger contact, "
-        "reward climbs steeply to ~1200. (3) Lift refinement (800k-3.5M): the agent fine-tunes the "
-        "precise finger configuration needed to sustain the lift threshold, reward stabilizes at ~1600. "
-        "The resume runs (past 1.5M steps) pushed the policy to its final 96% robustness by exposing it "
-        "to more diverse randomized cube starting positions."
+        "discovers fingertip-to-cube proximity rewards. (2) Grasping discovery (300k-1.5M): the policy "
+        "learns to make stable multi-finger contact and slightly lift the cube to farm reward, peaking "
+        "at convergence around 1.5M steps. (3) Over-exploration and Regression (1.5M-2.5M): during the "
+        "resume run, the constant high learning rate (3e-4) caused aggressive updates to the already "
+        "converged policy, leading to catastrophic forgetting and steady regression in mean reward from "
+        "~1600 down to ~1000. Evaluating the peak model (saved dynamically by EvalCallback at ~1.5M) "
+        "is necessary to capture the best policy state before regression."
     )
 
-    # --- 6. What Worked -----------------------------------------------------
-    pdf.section_title("6. What Worked")
+    # --- 6. Critical Analysis of Success Metric -----------------------------
+    pdf.section_title("6. Critical Analysis of Success Metric")
+    pdf.body_text(
+        "The proxy metric initially reported a 96% success rate, but the rigorous physical criterion "
+        "(cube lifted > 0.25m and sustained for 10 steps) reports exactly 0%. Here is why they differ "
+        "and what this means:"
+    )
+    pdf.bullet("Proxy Flaw: The initial evaluation script falsely defined success as ep_reward > 500 combined with early termination. If the agent grabbed the cube, farmed 800 reward by hovering it slightly off the ground, and then flung it out of bounds (triggering early termination and a -50 penalty), it finished with 750 reward and <500 steps, falsely counting as a 'success'.")
+    pdf.bullet("Reward Hacking: The lift reward formula (50.0 * max(0, z - 0.075)) allowed the agent to achieve massive cumulative reward simply by holding the cube at Z=0.12m for the entire 500-step episode. The policy never needed to reach the true 0.25m threshold to maximize expected return.")
+    pdf.bullet("OOB Boundary Flaw: The out-of-bounds check (dist_xy > 0.1m) was too tight given the spawn radius. The agent was heavily penalized for lateral manipulation, forcing it into conservative, low-height hovers rather than dynamic lifts.")
+
+    # --- 7. What Worked -----------------------------------------------------
+    pdf.section_title("7. What Worked")
     pdf.bullet("Top-down hand orientation (quat='1 0 0 0'): essential for generating upward Z-force against gravity. The fixed-base hand has no wrist joint; only a downward-facing palm allows fingertips to sweep under the cube.")
     pdf.bullet("Delta control (max_delta=0.1 rad/step): eliminated all simulator instability and produced smooth, physically realistic grasps.")
     pdf.bullet("Grasping-gated lift reward: completely stopped the 'fling' exploit where the agent would bat the cube upward.")
-    pdf.bullet("VecNormalize: stabilized the reward distribution across the full 3.5M step training run, preventing reward scale drift during resumes.")
     pdf.bullet("Height calibration (Z=0.16m): the 'Goldilocks' height gave fingers clearance to close around the cube without getting stuck under the table.")
 
-    # --- 7. What Failed -----------------------------------------------------
-    pdf.section_title("7. What Failed")
-    pdf.bullet("Sideways orientation: physically impossible to lift -- no upward force vector. Spent multiple training runs before diagnosing the root cause.")
-    pdf.bullet("Velocity-based action penalty: qvel spikes from MuJoCo contacts made this highly unstable. Replaced with a smoother action magnitude penalty.")
-    pdf.bullet("Naive contact reward (all contacts): the agent exploited the 4 resting contacts between cube and table to farm reward without grasping.")
-    pdf.bullet("Absolute position control: caused infinite-acceleration exploits ('flinging') that the agent discovered within the first 50k steps.")
+    # --- 8. What Failed -----------------------------------------------------
+    pdf.section_title("8. What Failed")
+    pdf.bullet("Sideways orientation: physically impossible to lift -- no upward force vector.")
+    pdf.bullet("Velocity-based action penalty: qvel spikes from MuJoCo contacts made this highly unstable.")
+    pdf.bullet("Naive contact reward (all contacts): the agent exploited the 4 resting contacts between cube and table.")
+    pdf.bullet("High constant learning rate: 3e-4 was too aggressive for fine-tuning past 1.5M steps, causing regression.")
 
-    # --- 8. What I'd Do Differently -----------------------------------------
-    pdf.section_title("8. What I Would Do Differently")
-    pdf.bullet("Curriculum learning: start with the cube directly under the fingertips and gradually increase randomization range, reducing the hard exploration problem.")
-    pdf.bullet("Domain randomization: vary cube mass, friction, and size during training for better real-world transfer.")
-    pdf.bullet("Asymmetric actor-critic: give the critic access to privileged state (e.g., contact forces) while the actor uses only proprioception, improving value estimation quality.")
-    pdf.bullet("Learning rate schedule: anneal learning_rate from 3e-4 to 1e-5 over training to avoid divergence at high total timesteps (the large std=28 seen late in training suggests over-exploration).")
+    # --- 9. What I'd Do Differently -----------------------------------------
+    pdf.section_title("9. What I Would Do Differently")
+    pdf.bullet("Learning rate schedule: anneal learning_rate from 3e-4 to 1e-5 over training to prevent policy degradation.")
+    pdf.bullet("Fix Reward Structure: Change the lift reward to be exponential or sparse upon crossing the true Z=0.25m threshold, preventing the agent from farming reward at low hover heights.")
+    pdf.bullet("Widen OOB Boundary: Increase dist_xy threshold to 0.2m to allow realistic lateral grasping adjustments without triggering premature failure.")
+    pdf.bullet("Curriculum learning: start with the cube directly under the fingertips and gradually increase randomization range.")
 
     # --- Results Summary ----------------------------------------------------
     pdf.ln(3)
@@ -192,10 +202,10 @@ def build():
     pdf.cell(0, 7, "  Final Evaluation Results (100 randomized episodes, deterministic policy)", new_x="LMARGIN", new_y="NEXT", fill=True, border=1)
     pdf.set_font("Helvetica", size=9.5)
     results = [
-        ("Mean Episode Reward", "1632.25  +/-  461.05"),
-        ("Mean Episode Length", "461.72  /  500 steps"),
-        ("Success Rate", "96%  (96 / 100 episodes)"),
-        ("Total Training Steps", "3,500,000"),
+        ("Mean Episode Reward", "1541.28  +/-  499.10"),
+        ("Mean Episode Length", "441.86  /  500 steps"),
+        ("True Success Rate", "0%  (Proxy metric was 96%)"),
+        ("Total Training Steps", "2,500,000"),
     ]
     for k, v in results:
         pdf.set_x(14)
