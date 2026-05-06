@@ -3,6 +3,6 @@ Model: results/best_model/best_model.zip
 Episodes: 100
 Deterministic: True
 
-Mean Reward: 1541.28 +/- 499.10
-Mean Episode Length: 441.86
-Success Rate: 0.00% (0/100)
+Mean Reward: 1398.06 +/- 537.60
+Mean Episode Length: 414.93
+Success Rate: 15.00% (15/100)

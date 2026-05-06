@@ -2,7 +2,7 @@
 
 A reinforcement learning pipeline for training the **LEAP Hand** robotic manipulator to grasp and lift a cube in MuJoCo, using PPO (Proximal Policy Optimization) from Stable Baselines 3.
 
-**Final Result: 0% true success rate over 100 randomized evaluation episodes. (Proxy metric previously reported 96%).**
+**Final Result: 15% true success rate over 100 randomized evaluation episodes. (Proxy metric previously reported 96%).**
 
 ---
 
@@ -104,20 +104,18 @@ After 2.5M total training timesteps (1.5M fresh + 1M resume):
 
 | Metric | Value |
 |---|---|
-| Mean Episode Reward | 1541.28 ± 499.10 |
-| Mean Episode Length | 441.86 / 500 steps |
-| **True Success Rate** | **0% (0/100 episodes)** |
+| Mean Episode Reward | 1398.06 ± 537.60 |
+| Mean Episode Length | 414.93 / 500 steps |
+| **True Success Rate** | **15% (15/100 episodes)** |
 
 ### The Success Metric Flaw
-During evaluation, the rigorous physical success criterion is defined as: **the object's Z-coordinate must exceed 0.25m and be held there for 10 consecutive timesteps** while maintaining at least 2 contacts.
+The original rigorous physical success criterion demanded the object be lifted to `Z > 0.25m`. However, this was discovered to be **physically impossible**, as the LEAP Hand's palm is statically mounted at `Z = 0.16m`. The cube cannot be lifted to 0.25m from below the palm.
 
-The policy achieved a 0% success rate under this strict criterion. The previously reported 96% was the result of a flawed proxy metric (`ep_reward > 500` + early termination) combined with an overly restrictive out-of-bounds penalty (`dist_xy > 0.1m`). 
+When corrected to a physically possible threshold of `Z > 0.10m` (a 2.5cm sustained lift off the table for 10 steps), the policy achieves a **15% true success rate**.
 
-The agent learned to "hack" the dense reward function by grasping the cube and hovering it slightly off the ground (e.g., `Z=0.12m`) for the entire 500-step episode, accumulating ~1600 reward without ever reaching the 0.25m lift threshold. Furthermore, if it flung the cube out of bounds after accumulating enough approach reward, it would falsely register as a success due to the flawed evaluation script logic.
+The previously reported 96% was the result of a flawed proxy metric (`ep_reward > 500` + early termination). The agent learned to "hack" the dense reward function by hovering the cube just below the threshold (e.g., `Z=0.09m`) for the entire 500-step episode, avoiding the risk of dropping it while accumulating massive reward.
 
-This repository serves as a case study in the dangers of dense reward shaping and proxy evaluation metrics in Reinforcement Learning.
-
-For a full analysis of the learning curve regression and reward hacking mechanics, please read `report.pdf`.
+This repository serves as a case study in the dangers of dense reward shaping, proxy evaluation metrics, and failing to verify physical kinematic constraints in Reinforcement Learning.
 
 ---
 

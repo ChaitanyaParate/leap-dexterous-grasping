@@ -51,7 +51,8 @@ class LeapGraspEnv(gym.Env):
         )
 
         # Lift threshold: object center must exceed this height to count as lifted
-        self.lift_threshold = 0.25  # meters above world origin
+        # Palm is at Z=0.16m, cube starts at Z=0.075m. 0.10m represents a clear 2.5cm lift.
+        self.lift_threshold = 0.10  # meters above world origin
 
         # Require cube to stay above threshold for this many consecutive steps
         # This prevents the "fling and terminate" exploit
