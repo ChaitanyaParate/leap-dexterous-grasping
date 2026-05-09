@@ -1,8 +1,13 @@
---- Evaluation Results ---
-Model: results/best_model/best_model.zip
-Episodes: 100
-Deterministic: True
 
-Mean Reward: 1398.06 +/- 537.60
-Mean Episode Length: 414.93
-Success Rate: 15.00% (15/100)
+=============================================
+  Evaluation Results (100 episodes)
+=============================================
+  Model:            results/final_model.zip
+  Z threshold:      0.090 m
+  Sustain required: 20 steps
+  Deterministic:    True
+─────────────────────────────────────────────
+  Mean Reward:      2846.96 ± 3305.17
+  Mean Ep Length:   994.01 / 1000
+  True Success Rate:85.0%  (85/100)
+=============================================

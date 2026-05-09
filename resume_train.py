@@ -52,7 +52,7 @@ def main():
     )
 
     # Load the model
-    model_path = "results/best_model/best_model.zip"
+    model_path = "results/checkpoints/leap_ppo_resume_2677048_steps.zip"
         
     print(f"Loading model from {model_path}")
     model = PPO.load(model_path, env=env, tensorboard_log="results/tensorboard/")

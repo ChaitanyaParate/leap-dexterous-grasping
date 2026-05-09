@@ -6,6 +6,12 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 import sys
 sys.path.insert(0, '.')
 from env.leap_grasp_env import LeapGraspEnv
+from typing import Callable
+
+def linear_schedule(initial_value: float) -> Callable[[float], float]:
+    def func(progress_remaining: float) -> float:
+        return progress_remaining * initial_value
+    return func
 
 # Directories
 os.makedirs("results/checkpoints", exist_ok=True)
@@ -50,7 +56,7 @@ model = PPO(
     n_steps=2048,
     batch_size=64,
     n_epochs=10,
-    learning_rate=3e-4,
+    learning_rate=linear_schedule(3e-4),
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.15,
@@ -67,7 +73,7 @@ print("Verification passed.")
 
 # Full training
 model.learn(
-    total_timesteps=1_500_000,
+    total_timesteps=2_000_000,
     callback=[checkpoint_cb, eval_cb],
     reset_num_timesteps=False
 )

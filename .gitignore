@@ -15,3 +15,12 @@ mujoco_menagerie/*
 mujoco_menagerie/leap_hand/*
 !mujoco_menagerie/leap_hand/grasp_scene.xml
 !mujoco_menagerie/leap_hand/right_hand_grasp.xml
+
+progress_report_taskA.md
+
+# Ignore videos
+*.mp4
+*.webm
+*.avi
+*.mkv
+videos/
