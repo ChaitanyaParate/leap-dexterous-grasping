@@ -1,115 +1,167 @@
 """
 plot_learning_curve.py
-Reads TensorBoard event files and produces a learning curve plot
-saved to results/learning_curve.png.
+Generates an accurate 2-panel learning curve from monitor CSV files and
+EvalCallback evaluations.npz. Replaces the previous TensorBoard-based version.
+
+Panel 1 (top)   : Rolling-mean episode reward across both training phases.
+Panel 2 (bottom): EvalCallback success rate (%) — available for resume phase only.
 """
-import os
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from collections import defaultdict
+import os
 
-try:
-    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
-except ImportError:
-    print("Installing tensorboard...")
-    os.system("pip install tensorboard -q")
-    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+MONITOR_FRESH   = "results/logs/monitor.csv"
+MONITOR_RESUME  = "results/logs/monitor_resume.csv.monitor.csv"
+EVAL_NPZ        = "results/logs/evaluations.npz"
+OUT_PATH        = "results/learning_curve.png"
 
+RESUME_START_STEP = 2_677_048   # checkpoint used to start resume_train.py
+ROLL_WINDOW       = 60          # episode rolling-mean window
+SMOOTH_WEIGHT     = 0.90        # EMA weight for reward curve
 
-def load_tb_scalars(logdir, tag="rollout/ep_rew_mean"):
-    """Load scalar values from a TensorBoard event directory."""
-    ea = EventAccumulator(logdir, size_guidance={"scalars": 0})
-    ea.Reload()
-    if tag not in ea.Tags()["scalars"]:
-        print(f"  Warning: tag '{tag}' not found in {logdir}")
-        return np.array([]), np.array([])
-    events = ea.Scalars(tag)
-    steps = np.array([e.step for e in events])
-    values = np.array([e.value for e in events])
-    return steps, values
+# ── colour palette (dark background) ────────────────────────────────────────
+BG       = "#0F1117"
+PANEL_BG = "#16171F"
+C_FRESH  = "#4C9BE8"   # blue  — fresh run
+C_RESUME = "#F4845F"   # coral — resume run
+C_SUCC   = "#2ECC71"   # green — success rate
+C_FINAL  = "#E8D44D"   # gold  — final eval marker
+GRAY     = "#555566"
 
 
-def smooth(values, weight=0.85):
-    """Exponential moving average smoothing."""
-    last = values[0]
-    smoothed = []
+def load_monitor(path):
+    """Return DataFrame with columns [r, l] from a Stable-Baselines Monitor CSV."""
+    df = pd.read_csv(path, skiprows=1, names=["r", "l", "t"])
+    df["r"] = pd.to_numeric(df["r"], errors="coerce")
+    df["l"] = pd.to_numeric(df["l"], errors="coerce")
+    df = df.dropna(subset=["r", "l"])
+    return df
+
+
+def rolling(values, window):
+    """Centred rolling mean (edges use available data)."""
+    series = pd.Series(values)
+    return series.rolling(window, min_periods=1, center=True).mean().values
+
+
+def ema(values, weight=0.90):
+    last = float(values[0])
+    out = []
     for v in values:
-        last = last * weight + (1 - weight) * v
-        smoothed.append(last)
-    return np.array(smoothed)
+        last = last * weight + (1 - weight) * float(v)
+        out.append(last)
+    return np.array(out)
 
 
 def main():
     os.makedirs("results", exist_ok=True)
 
-    # Locate TensorBoard runs
-    tb_base = "results/tensorboard"
-    runs = {
-        "Run 1 (0–1.5M steps)": os.path.join(tb_base, "PPO_1"),
-        "Run 2 (1.5M–3.5M steps, resume)": os.path.join(tb_base, "PPO_resume_0"),
-    }
+    # ── load episode data ────────────────────────────────────────────────────
+    df_fresh  = load_monitor(MONITOR_FRESH)
+    df_resume = load_monitor(MONITOR_RESUME)
 
-    fig, ax = plt.subplots(figsize=(12, 6))
-    colors = ["#4C9BE8", "#F4845F"]
-    offset = 0  # step offset for stitching runs
+    # Cumulative step counts inside each run
+    steps_fresh  = np.cumsum(df_fresh["l"].values)          # 0 → ~2.0 M
+    steps_resume = RESUME_START_STEP + np.cumsum(df_resume["l"].values)  # → ~3.7 M
 
-    for (label, logdir), color in zip(runs.items(), colors):
-        if not os.path.exists(logdir):
-            print(f"Skipping {logdir} — not found")
-            continue
-        print(f"Loading: {logdir}")
-        steps, values = load_tb_scalars(logdir, "rollout/ep_rew_mean")
-        if len(steps) == 0:
-            continue
+    rew_fresh  = df_fresh["r"].values
+    rew_resume = df_resume["r"].values
 
-        # Stitch runs together
-        stitched_steps = steps + offset
-        offset = stitched_steps[-1]
+    roll_fresh  = rolling(rew_fresh,  ROLL_WINDOW)
+    roll_resume = rolling(rew_resume, ROLL_WINDOW)
 
-        # Raw and smoothed
-        ax.plot(stitched_steps, values, alpha=0.2, color=color, linewidth=0.8)
-        ax.plot(stitched_steps, smooth(values), color=color, linewidth=2.2, label=label)
+    # ── load eval checkpoints (resume phase only) ────────────────────────────
+    ev = np.load(EVAL_NPZ)
+    eval_steps   = ev["timesteps"]                    # shape (40,)
+    eval_rewards = ev["results"].mean(axis=1)         # mean over 5 episodes
+    eval_success = ev["successes"].mean(axis=1) * 100 # % success over 5 episodes
 
-    # Annotations
-    ax.axvline(x=1_500_000, color="gray", linestyle="--", linewidth=1.2, alpha=0.7)
-    ax.text(1_510_000, 200, "Resume\n(Z=0.16)", fontsize=9, color="gray")
+    # ── figure ───────────────────────────────────────────────────────────────
+    fig, (ax_r, ax_s) = plt.subplots(
+        2, 1, figsize=(13, 8),
+        gridspec_kw={"height_ratios": [3, 2], "hspace": 0.08},
+        sharex=True
+    )
+    fig.patch.set_facecolor(BG)
+    for ax in (ax_r, ax_s):
+        ax.set_facecolor(PANEL_BG)
+        for spine in ax.spines.values():
+            spine.set_edgecolor(GRAY)
+        ax.tick_params(colors="white", labelsize=9)
+        ax.xaxis.label.set_color("white")
+        ax.yaxis.label.set_color("white")
 
-    ax.axhline(y=1000, color="#2ECC71", linestyle=":", linewidth=1.2, alpha=0.8)
-    ax.text(100_000, 1020, "Success threshold (~1000)", fontsize=9, color="#2ECC71")
+    # ── Panel 1 : episode reward ─────────────────────────────────────────────
+    # raw (faint)
+    ax_r.plot(steps_fresh,  rew_fresh,  alpha=0.08, color=C_FRESH,  linewidth=0.6)
+    ax_r.plot(steps_resume, rew_resume, alpha=0.08, color=C_RESUME, linewidth=0.6)
+    # rolling mean
+    ax_r.plot(steps_fresh,  roll_fresh,  color=C_FRESH,  linewidth=2.2,
+              label="Phase 1 — Fresh run (0 – 2.7 M steps)")
+    ax_r.plot(steps_resume, roll_resume, color=C_RESUME, linewidth=2.2,
+              label="Phase 2 — Resume run (2.7 – 3.7 M steps)")
 
-    # Final result annotation
-    ax.annotate(
-        "96% Success Rate\n(1632 mean reward)",
-        xy=(3_000_000, 1632),
-        xytext=(2_400_000, 1200),
-        arrowprops=dict(arrowstyle="->", color="white", lw=1.5),
-        fontsize=10, color="white",
-        bbox=dict(boxstyle="round,pad=0.3", facecolor="#2C3E50", edgecolor="#4C9BE8")
+    # eval reward dots (mid-training, 5 eps, normalised)
+    ax_r.scatter(eval_steps, eval_rewards, color=C_SUCC, s=18, zorder=5,
+                 alpha=0.7, label="EvalCallback reward (5 eps, norm)")
+
+    # phase separator
+    ax_r.axvline(RESUME_START_STEP, color=GRAY, linestyle="--", linewidth=1.2)
+    ax_r.text(RESUME_START_STEP + 40_000, ax_r.get_ylim()[0] if ax_r.get_ylim()[0] > -3000 else -2500,
+              "Resume\nstart", color=GRAY, fontsize=8, va="bottom")
+
+    # final eval annotation (honest: 85%, 100 eps, raw reward)
+    ax_r.axhline(2846.96, color=C_FINAL, linestyle=":", linewidth=1.4, alpha=0.9)
+    ax_r.text(200_000, 2846.96 + 120,
+              "Final eval mean reward: 2847 (100 eps, raw, deterministic)",
+              color=C_FINAL, fontsize=8)
+
+    ax_r.set_ylabel("Episode Reward", fontsize=11, color="white")
+    ax_r.set_title(
+        "LEAP Hand Grasping — PPO Learning Curve  |  Two-Phase Training (~3.7 M Steps)",
+        fontsize=13, color="white", pad=10
+    )
+    ax_r.legend(fontsize=8.5, facecolor="#1C1C2E", labelcolor="white",
+                edgecolor=GRAY, loc="upper left")
+
+    # ── Panel 2 : success rate ───────────────────────────────────────────────
+    ax_s.plot(eval_steps, eval_success, color=C_SUCC, linewidth=2.2,
+              marker="o", markersize=4, label="EvalCallback success % (5 eps, mid-training)")
+    ax_s.fill_between(eval_steps, eval_success, alpha=0.12, color=C_SUCC)
+
+    # final eval 85% line
+    ax_s.axhline(85, color=C_FINAL, linestyle=":", linewidth=1.4, alpha=0.9)
+    ax_s.text(eval_steps[0], 86.5, "Final deterministic eval: 85%  (100 episodes)",
+              color=C_FINAL, fontsize=8)
+
+    # phase separator
+    ax_s.axvline(RESUME_START_STEP, color=GRAY, linestyle="--", linewidth=1.2)
+
+    ax_s.set_ylabel("Success Rate (%)", fontsize=11, color="white")
+    ax_s.set_xlabel("Total Training Timesteps", fontsize=11, color="white")
+    ax_s.set_ylim(0, 115)
+    ax_s.set_yticks([0, 20, 40, 60, 80, 100])
+
+    # note about eval availability
+    ax_s.text(0.01, 0.05,
+              "Note: EvalCallback data available for Phase 2 only. "
+              "Phase 1 mid-training success not logged.",
+              transform=ax_s.transAxes, color=GRAY, fontsize=7.5, va="bottom")
+
+    ax_s.legend(fontsize=8.5, facecolor="#1C1C2E", labelcolor="white",
+                edgecolor=GRAY, loc="lower right")
+
+    # ── x-axis formatting ────────────────────────────────────────────────────
+    ax_s.xaxis.set_major_formatter(
+        plt.FuncFormatter(lambda x, _: f"{x/1_000_000:.1f}M")
     )
 
-    # Style
-    ax.set_facecolor("#1C1C2E")
-    fig.patch.set_facecolor("#1C1C2E")
-    ax.tick_params(colors="white")
-    ax.spines["bottom"].set_color("#555")
-    ax.spines["left"].set_color("#555")
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.xaxis.label.set_color("white")
-    ax.yaxis.label.set_color("white")
-    ax.title.set_color("white")
-
-    ax.set_xlabel("Total Timesteps", fontsize=12)
-    ax.set_ylabel("Mean Episode Reward", fontsize=12)
-    ax.set_title("LEAP Hand Grasping — PPO Learning Curve (3.5M Steps)", fontsize=14, pad=15)
-    ax.legend(fontsize=10, facecolor="#2C3E50", labelcolor="white", edgecolor="#555")
-    ax.set_xlim(left=0)
-
-    plt.tight_layout()
-    out_path = "results/learning_curve.png"
-    plt.savefig(out_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
-    print(f"\nLearning curve saved to {out_path}")
+    plt.tight_layout(rect=[0, 0, 1, 1])
+    plt.savefig(OUT_PATH, dpi=150, bbox_inches="tight", facecolor=BG)
+    print(f"Learning curve saved to {OUT_PATH}")
+    plt.close()
 
 
 if __name__ == "__main__":
