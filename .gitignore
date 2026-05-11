@@ -33,3 +33,7 @@ results/train_log_resume.txt
 *.avi
 *.mkv
 videos/
+
+# Report artifacts (generated locally, not tracked)
+report.pdf
+generate_report.py
